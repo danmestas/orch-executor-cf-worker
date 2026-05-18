@@ -1,0 +1,27 @@
+{
+  "name": "@danmestas/orch-executor-cf-worker",
+  "version": "0.0.0-scaffold",
+  "description": "orch executor backend: spawns ephemeral Cloudflare Worker agents per orch proposal 0003. Phase A scaffold — sources move from orch in Phase B (blocked on orch#141).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danmestas/orch-executor-cf-worker.git"
+  },
+  "bugs": "https://github.com/danmestas/orch-executor-cf-worker/issues",
+  "homepage": "https://github.com/danmestas/orch-executor-cf-worker#readme",
+  "bin": {
+    "orch-executor-cf-worker": "bin/orch-executor-cf-worker"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "MIGRATION.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "version-probe": "bin/orch-executor-cf-worker --version"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
