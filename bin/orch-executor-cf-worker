@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# orch-executor-cf-worker — placeholder for Phase A of orch proposal 0003.
+#
+# Real implementation lands in Phase B once orch's typed SpawnSpec contract
+# (proposal 0002 / issue #141) merges. Until then this stub exits 64 so any
+# accidental invocation fails loudly and unambiguously rather than half-working.
+#
+# Contract (post-Phase B):
+#   stdin:  SpawnSpec YAML
+#   stdout: WorkerHandle YAML
+#   stderr: diagnostics
+#   exit:   0 success; non-zero failure
+#
+# Tracking issues:
+#   - orch#141 (SpawnSpec contract — blocking)
+#   - orch#142 (this extraction)
+
+set -euo pipefail
+
+case "${1:-}" in
+  --version)
+    # Scaffold version; bumps when Phase B lands.
+    echo "orch-executor-cf-worker 0.0.0-scaffold"
+    exit 0
+    ;;
+  --help|-h|"")
+    cat >&2 <<'EOF'
+orch-executor-cf-worker — Cloudflare Worker executor backend for orch.
+
+Phase A scaffold. Not yet wired to spawn workers. Tracking:
+  https://github.com/danmestas/orch/issues/141  (SpawnSpec — blocking)
+  https://github.com/danmestas/orch/issues/142  (this extraction)
+
+Usage (post-Phase B):
+  echo "<spawnspec-yaml>" | orch-executor-cf-worker
+  orch-executor-cf-worker --validate
+  orch-executor-cf-worker --status   <handle-id>
+  orch-executor-cf-worker --abort    <handle-id>
+  orch-executor-cf-worker --teardown <handle-id>
+  orch-executor-cf-worker --version
+EOF
+    exit 64
+    ;;
+  *)
+    echo "orch-executor-cf-worker: not implemented in Phase A scaffold (orch#141 blocks)" >&2
+    exit 64
+    ;;
+esac
