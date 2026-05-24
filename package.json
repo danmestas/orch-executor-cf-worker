@@ -1,8 +1,9 @@
 {
   "name": "@danmestas/orch-executor-cf-worker",
-  "version": "0.0.0-scaffold",
-  "description": "orch executor backend: spawns ephemeral Cloudflare Worker agents per orch proposal 0003. Phase A scaffold — sources move from orch in Phase B (blocked on orch#141).",
+  "version": "0.1.0",
+  "description": "orch executor backend: provisions Cloudflare Worker open-agent bridges from a SpawnSpec YAML on stdin and emits a WorkerHandle YAML on stdout. Implements orch proposal 0002 / executor-protocol.",
   "license": "Apache-2.0",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/danmestas/orch-executor-cf-worker.git"
@@ -14,12 +15,31 @@
   },
   "files": [
     "bin/",
+    "dist/",
+    "schemas/",
+    "src/worker/",
+    "wrangler.toml",
     "README.md",
     "MIGRATION.md",
     "LICENSE"
   ],
   "scripts": {
-    "version-probe": "bin/orch-executor-cf-worker --version"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "version-probe": "node dist/cli.js --version",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
+    "yaml": "2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.16.10",
+    "typescript": "5.6.3",
+    "vitest": "2.1.9"
   },
   "engines": {
     "node": ">=18"
