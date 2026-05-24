@@ -56,6 +56,41 @@ orch-executor-cf-worker --version
 The npm postinstall step is implicit: npm wires the `bin/` entry on
 `PATH`. Discovery then resolves automatically.
 
+## Releasing
+
+Releases are driven by tag pushes to `main`.
+
+```bash
+# 1. From main with a clean tree, tag the release commit:
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The push triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which:
+
+1. Builds + typechecks + tests against Node 20.
+2. Derives the npm version from the tag (`v1.0.0` → `1.0.0`) and rewrites
+   `package.json` in place (release-time only — never committed back).
+3. Runs `npm publish --access public` to upload
+   `@danmestas/orch-executor-cf-worker@<version>`.
+
+The dry-run gate on `ci.yml` (`npm publish --dry-run`) catches packaging
+breakage (missing `files`, bad `bin` path) on every PR — so a tag push
+shouldn't surprise you.
+
+**One-time secret setup** (operator):
+
+```bash
+gh secret set NPM_TOKEN --repo danmestas/orch-executor-cf-worker
+# Paste an npm automation token with publish rights to
+# @danmestas/orch-executor-cf-worker.
+```
+
+**Rehearse without publishing** via the `workflow_dispatch` trigger
+("Run workflow" in the GitHub Actions UI) with `dry_run: true` — the
+publish step runs as `npm publish --dry-run` and uploads nothing.
+
 ## Environment variables
 
 | Variable                              | Purpose                                                                                  | Default                          |
