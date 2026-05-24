@@ -27,3 +27,19 @@ jobs:
         run: npm test
       - name: Version probe
         run: npm run version-probe
+
+  npm-publish-dry-run:
+    name: npm publish --dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Publish dry-run
+        run: npm publish --access public --dry-run
