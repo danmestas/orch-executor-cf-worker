@@ -1,82 +1,160 @@
 # orch-executor-cf-worker
 
 Cloudflare Worker executor backend for [orch](https://github.com/danmestas/orch).
-Spawns an **ephemeral** open-agent bridge per fetch request — the bridge lives
-for the lifetime of the request, then CF tears down the worker.
+Reads a [SpawnSpec][spawn-spec] YAML on stdin, provisions a Cloudflare Worker
+running the open-agent NATS bridge, and emits a [WorkerHandle][worker-handle]
+YAML on stdout.
 
-For a **persistent** bridge that survives across fetches, see the sister
-repo [orch-executor-cf-durable-object](https://github.com/danmestas/orch-executor-cf-durable-object).
+[spawn-spec]: https://github.com/danmestas/orch/blob/main/docs/spawn-spec.md
+[worker-handle]: https://github.com/danmestas/orch/blob/main/dist/schema/worker-handle.v1.json
 
 ## Status
 
-**Phase A — scaffold only.** This repo holds the destination structure for
-the extraction described in [orch proposal 0003 (issue #142)][0003]. The
-actual TypeScript sources still live under `orch/executors/wasm/cf-worker/`
-and will move here in **Phase B** once orch's typed SpawnSpec contract
-([proposal 0002 / issue #141][0002]) lands.
+**Phase B — real implementation.** Wraps the open-agent Worker
+([`src/worker/index.ts`](src/worker/index.ts)) with the executor-protocol
+contract from [orch proposal 0002][0002] / [orch proposal 0003][0003].
 
-See [MIGRATION.md](MIGRATION.md) for the per-file move manifest.
+[0002]: https://github.com/danmestas/orch/blob/main/docs/proposals/0002-typed-executor-contract.md
+[0003]: https://github.com/danmestas/orch/blob/main/docs/proposals/0003-extract-executor-backends.md
 
-[0002]: https://github.com/danmestas/orch/issues/141
-[0003]: https://github.com/danmestas/orch/issues/142
-
-## Why a separate repo
-
-Per orch proposal 0003 (Ousterhout-review-adjusted): backends with **heavyweight
-dependency footprints** (CF Worker / Durable Object) extract to sister repos
-so orch's main repo stops shipping TypeScript + wrangler + miniflare. The
-lightweight `tmux` backend stays in-tree — too small (~50 LoC bash) to justify
-extraction overhead. This split lets each backend release on its own cadence
-in its own language with its own CI.
-
-## How orch finds this backend
-
-orch-spawn discovers backends via PATH lookup or
-`~/.local/share/orch/executors/<name>/spawn`. Once installed, this binary
-appears as **`orch-executor-cf-worker`** on PATH (npm postinstall wires it).
-
-## Spawn contract (post-Phase B, requires orch #141)
+## Contract
 
 ```
 $ orch-executor-cf-worker
-  stdin:  SpawnSpec YAML (per orch proposal 0002)
-  stdout: WorkerHandle YAML on success
+  stdin:  SpawnSpec v1 YAML
+  stdout: WorkerHandle v1 YAML on success
   stderr: human-readable diagnostics
-  exit:   0 success; non-zero failure
+  exit:   0  success (a handle was emitted — note: a handle with
+             status=failed still exits 0 because the dispatcher
+             interprets the field)
+          64 usage error (bad args, empty stdin)
+          65 input error (invalid YAML or schema validation failure)
+          70 runtime error (provisioning aborted before a handle
+             could be assembled)
 ```
 
-Supplementary commands (post-Phase B):
+Schemas are pinned at v1 (committed copies in `schemas/`, generated
+from `orch/internal/spawnspec/types.go`). Validation runs on both the
+input SpawnSpec and the emitted WorkerHandle.
 
-| Command                                | Purpose                                  |
-| -------------------------------------- | ---------------------------------------- |
-| `orch-executor-cf-worker --version`    | Backend version for orch-version probe   |
-| `orch-executor-cf-worker --validate`   | Pre-flight check (no spawn)              |
-| `orch-executor-cf-worker --status ID`  | Query worker lifecycle state             |
-| `orch-executor-cf-worker --abort ID`   | Imperative cancellation                  |
-| `orch-executor-cf-worker --teardown ID`| Cleanup after worker dies                |
+## How orch-spawn finds this binary
 
-Until Phase B lands, the `bin/orch-executor-cf-worker` stub exits 64 with a
-"not yet implemented" message and a link back to issue #141.
+orch-spawn uses hybrid discovery (per orch#142):
 
-## Install (Phase B onward)
+1. **Env override:** `ORCH_EXECUTOR_CF_WORKER_CMD` — full command path.
+2. **PATH lookup:** `orch-executor-cf-worker` on `$PATH`.
+3. **In-tree fallback:** orch's bundled `~/.local/share/orch/executors/cf-worker/spawn`
+   (only when the published binary isn't installed).
+
+Install via npm:
 
 ```bash
 npm install -g @danmestas/orch-executor-cf-worker
-# postinstall symlinks bin/orch-executor-cf-worker onto PATH
 orch-executor-cf-worker --version
 ```
 
-## What this executor wraps
+The npm postinstall step is implicit: npm wires the `bin/` entry on
+`PATH`. Discovery then resolves automatically.
 
-A Cloudflare Worker that joins a sesh hub as a Synadia agents microservice.
-Each incoming `fetch /agent/<session>` runs one agent for the duration of the
-NATS connection; the session name maps to:
+## Environment variables
+
+| Variable                              | Purpose                                                                                  | Default                          |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------- |
+| `CF_WORKER_URL`                       | Override the deployed Worker base URL (wins over `cf-worker.script`).                    | unset                            |
+| `CF_WORKER_HEALTHCHECK`               | Set to `0` / `false` / `off` to skip the readiness probe (handle emits `status=pending`). | enabled                          |
+| `CF_WORKER_HEALTHCHECK_TIMEOUT_MS`    | Per-attempt timeout for `GET /health`.                                                   | `5000`                           |
+| `CF_WORKER_HEALTHCHECK_RETRIES`       | Number of healthcheck attempts before giving up.                                         | `3`                              |
+| `OPEN_AGENT_OWNER`                    | Owner token used in the `agents.prompt.open-agent.<owner>.<session>` bus pattern.        | `SpawnSpec.owner` ∨ `worker`     |
+
+## SpawnSpec example
+
+```yaml
+spec_version: v1
+name: lead-engineer
+agent: claude-code
+session: lead-engineer
+owner: dmestas
+
+cf-worker:
+  script: https://orch-cf-agent.example.workers.dev
+  abort_endpoint: /control/abort
+```
+
+When `cf-worker.script` is a URL, it's used as the deployed Worker base.
+When it's a relative path (e.g. `src/worker/index.ts`), the backend
+assumes wrangler-dev on `http://127.0.0.1:8787` and emits a stderr
+diagnostic — set `CF_WORKER_URL` to be explicit.
+
+## WorkerHandle example
+
+```yaml
+spec_version: v1
+name: lead-engineer
+agent: claude-code
+session: lead-engineer
+created_at: 2026-05-24T15:30:00.000Z
+executor: cf-worker
+id: https://orch-cf-agent.example.workers.dev
+bus:
+  prompt: agents.prompt.open-agent.dmestas.lead-engineer
+  status: agents.status.open-agent.dmestas.lead-engineer
+  hb: agents.hb.open-agent.dmestas.lead-engineer
+  signal: orch.signal.>.open-agent.dmestas.lead-engineer
+abort:
+  kind: http-post
+  target: https://orch-cf-agent.example.workers.dev/control/abort
+status: ready
+```
+
+The bus subjects follow the open-agent / Synadia microservice convention:
 
 ```
-agents.prompt.open-agent.<OPEN_AGENT_OWNER>.<session>
+agents.<verb>.open-agent.<owner>.<session>
 ```
 
-Synadia metadata advertised on the bus:
+The abort verb is `http-post`: orch-spawn cancels the worker by POSTing
+to `abort.target`.
+
+## Deploying the Worker
+
+The Worker source lives at `src/worker/`. To deploy:
+
+```bash
+# One-time:
+wrangler secret put NATS_WS_URL          # ws://your-hub:8080
+wrangler secret put OPENROUTER_API_KEY   # sk-or-...
+
+# Deploy:
+wrangler deploy
+
+# Verify:
+curl https://<your-worker>.workers.dev/health
+```
+
+Local development:
+
+```bash
+wrangler dev
+# Worker runs at http://127.0.0.1:8787
+# In another terminal:
+echo "$(cat <<'YAML'
+spec_version: v1
+name: dev-worker
+agent: claude-code
+cf-worker:
+  script: http://127.0.0.1:8787
+YAML
+)" | CF_WORKER_URL=http://127.0.0.1:8787 orch-executor-cf-worker
+```
+
+See `wrangler.toml` for full configuration. The Worker exposes:
+
+| Route                | Purpose                                                                  |
+| -------------------- | ------------------------------------------------------------------------ |
+| `GET /health`        | Liveness probe (used by this executor's healthcheck).                    |
+| `POST /agent/<name>` | Bootstrap an open-agent instance bound to the session token `<name>`.   |
+
+Synadia metadata advertised on the NATS bus:
 
 | Field      | Value       |
 | ---------- | ----------- |
@@ -84,13 +162,31 @@ Synadia metadata advertised on the bus:
 | `location` | `edge`      |
 | `lifetime` | `ephemeral` |
 
+## Development
+
+```bash
+npm install        # install ajv, yaml, vitest, typescript
+npm run typecheck  # tsc --noEmit
+npm run build      # tsc → dist/
+npm test           # vitest run
+```
+
+The integration test in `test/cli-integration.test.ts` exercises the
+full SpawnSpec → WorkerHandle round-trip against a local HTTP stub
+that simulates the deployed Worker. It does not require a Cloudflare
+account or `wrangler dev`.
+
+For an end-to-end check against the real worker, run `wrangler dev`
+from `src/worker/` and point `CF_WORKER_URL` at it manually (see
+"Local development" above).
+
 ## Phases
 
-| Phase | What happens                                                                          | Blocked on |
+| Phase | What happens                                                                          | Status     |
 | ----- | ------------------------------------------------------------------------------------- | ---------- |
-| **A** | This repo scaffolded (README + MIGRATION + bin stub). No TS yet.                      | —          |
-| **B** | TS sources move from `orch/executors/wasm/cf-worker/`; bin stub wraps `wrangler dev`. | orch #141  |
-| **C** | orch deletes `executors/wasm/cf-worker/`; bench installs this binary in Docker.       | Phase B    |
+| **A** | Repo scaffolded (README + MIGRATION + bin stub).                                      | done       |
+| **B** | TS sources moved from `orch/executors/wasm/cf-worker/`; CLI implements the contract.  | **this**   |
+| **C** | orch deletes `executors/wasm/cf-worker/`; bench installs this binary in Docker.       | next       |
 
 ## License
 

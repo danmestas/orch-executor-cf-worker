@@ -1,55 +1,57 @@
 # Phase B file-move manifest (orch → orch-executor-cf-worker)
 
-Tracks the exact files that move from `orch/executors/wasm/cf-worker/` to this
-repo in Phase B of [orch proposal 0003][0003]. **Nothing has moved yet** —
-this file is the contract that Phase B's PR will execute against.
+Tracks the files that moved from `orch/executors/wasm/cf-worker/` to this
+repo in Phase B of [orch proposal 0003][0003]. Phase B is now landed —
+this file remains as a record. Phase C deletes the orch-side copies.
 
 [0003]: https://github.com/danmestas/orch/blob/main/docs/proposals/0003-extract-executor-backends.md
 
-## Move-as-is (verbatim, paths rewritten)
+## Moved (Phase B)
 
-| Source (in `danmestas/orch`)                 | Destination (in this repo) |
-| -------------------------------------------- | -------------------------- |
-| `executors/wasm/cf-worker/src/index.ts`      | `src/index.ts`             |
-| `executors/wasm/cf-worker/src/local-sandbox.ts` | `src/local-sandbox.ts`  |
-| `executors/wasm/cf-worker/wrangler.toml`     | `wrangler.toml`            |
-| `executors/wasm/cf-worker/package.json`      | `package.json` (renamed pkg to `@danmestas/orch-executor-cf-worker`, `private: false`) |
-| `executors/wasm/cf-worker/tsconfig.json`     | `tsconfig.json`            |
-| `executors/wasm/cf-worker/README.md`         | merge into `README.md` (operator-facing sections) |
+| Source (in `danmestas/orch`)                    | Destination (in this repo)            |
+| ----------------------------------------------- | ------------------------------------- |
+| `executors/wasm/cf-worker/src/index.ts`         | `src/worker/index.ts`                 |
+| `executors/wasm/cf-worker/src/local-sandbox.ts` | `src/worker/local-sandbox.ts`         |
+| `executors/wasm/cf-worker/wrangler.toml`        | `wrangler.toml`                       |
+| `executors/wasm/cf-worker/tsconfig.json`        | `tsconfig.worker.json` (worker-only)  |
 
-## New in this repo (no orch counterpart)
+The Worker entrypoint (`src/worker/index.ts`) is unmodified — it is
+still the deployable artifact bootstrapping open-agent over NATS
+WebSockets. The Phase B work wraps that Worker with the executor-protocol
+contract: see `src/cli.ts`.
 
-| File                                    | Purpose                                              |
-| --------------------------------------- | ---------------------------------------------------- |
-| `bin/orch-executor-cf-worker`           | SpawnSpec stdin → WorkerHandle stdout; wraps `wrangler dev` / `wrangler deploy` per spec. **Phase A: stub exits 64.** |
-| `bin/orch-executor-cf-worker --version` | Version probe for orch-version backend discovery     |
-| `MIGRATION.md`                          | This file                                            |
-| `.github/workflows/ci.yml`              | TypeScript typecheck + `wrangler deploy --dry-run` on PR |
-| `LICENSE`                               | Apache 2.0 (matches orch)                            |
+## New in Phase B
 
-## Deleted from orch (Phase C)
+| File                                | Purpose                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| `src/cli.ts`                        | Entry point: reads SpawnSpec stdin, emits WorkerHandle stdout.          |
+| `src/spawn.ts`                      | Provisioning logic (bus subject derivation, abort verb, healthcheck).   |
+| `src/validate.ts`                   | Ajv-based schema validation for SpawnSpec + WorkerHandle.               |
+| `src/types.ts`                      | TS shapes mirroring `orch/internal/spawnspec/types.go`.                 |
+| `schemas/spawn-spec.v1.json`        | Pinned copy of orch's `dist/schema/spawn-spec.v1.json`.                 |
+| `schemas/worker-handle.v1.json`     | Pinned copy of orch's `dist/schema/worker-handle.v1.json`.              |
+| `test/validate.test.ts`             | Schema + discriminator validation unit tests.                           |
+| `test/spawn.test.ts`                | Bus / abort / healthcheck / provisioning unit tests.                    |
+| `test/cli-integration.test.ts`      | End-to-end CLI round-trip against a local HTTP stub Worker.             |
+| `tsconfig.json`                     | CLI-side TS config (emits `dist/`).                                     |
+| `tsconfig.worker.json`              | Worker-side TS config (typecheck only, separate lib).                   |
+| `vitest.config.ts`                  | Test runner config.                                                     |
+| `.github/workflows/ci.yml`          | CI: install, typecheck, build, test, version-probe on Node 20/22.       |
 
-After Phase B merges and this backend is published, the orch-side PR deletes:
+## Schema upkeep
+
+The schemas under `schemas/` are committed copies of orch's published
+`dist/schema/*.v1.json`. When orch bumps v1 (or adds v2), this repo
+imports the new file and regenerates fixtures. The version pin in
+`spec_version: v1` is the firewall — backends ignore unknown versions.
+
+## Phase C (after Phase B merges)
+
+Phase C deletes the orch-side directory:
 
 ```
-orch/executors/wasm/cf-worker/    (entire directory)
+orch/executors/wasm/cf-worker/
 ```
 
-…and updates `docs/multi-executor-workers.md` to point readers here.
-
-## Why these specific files
-
-The `src/`, `wrangler.toml`, `package.json`, `tsconfig.json` set together
-forms the deployable Worker. None of it is reused by other orch components,
-so the move is clean. The README is partially merged (deployment + spawn
-contract sections come over; orch-internal references stay there or get
-rewritten).
-
-## Why these files do NOT move
-
-| File                                | Why it stays in orch                              |
-| ----------------------------------- | ------------------------------------------------- |
-| `executors/tmux/spawn.sh`           | Lightweight backend (~50 LoC bash) stays in orch per Ousterhout-review (proposal 0003 §scope) |
-| Anything under `internal/spawnspec/` | Future orch package (proposal 0002); shared contract, lives in orch |
-| `docs/multi-executor-workers.md`    | Operator-facing roadmap; updated in Phase C to link here |
-| `test/docker-sesh/`                 | Bench fixtures; updated in Phase C to install this binary in Docker |
+…and updates `orch/docs/multi-executor-workers.md` to point readers
+here. Tracking issue in orch.
