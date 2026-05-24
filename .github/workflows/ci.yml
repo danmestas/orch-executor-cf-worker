@@ -4,6 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Pre-wired for GitHub merge queue. Until a queue ruleset is enabled this
+  # trigger is a no-op; once it's on, required-check jobs must respond to
+  # refs/merge-queue/* or every PR will hang.
+  merge_group:
+
+# Kill superseded runs on the same ref so push-and-fix iterations don't pile
+# up. github.workflow is included so unrelated workflows don't cross-cancel.
+# (Release workflow has its own concurrency policy — never cancel deploys.)
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   ci:

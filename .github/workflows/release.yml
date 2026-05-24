@@ -17,6 +17,13 @@ on:
         required: false
         default: ''
 
+# Serialize releases on the same ref but NEVER cancel a halfway-done publish
+# (cancel-in-progress: false). A second tag push or workflow_dispatch will
+# queue until the active run finishes rather than racing it.
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
