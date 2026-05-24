@@ -117,3 +117,51 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  smoke:
+    name: post-publish smoke
+    # Skip on dry-run dispatches — there's nothing to install from the registry.
+    # Tag pushes always run; workflow_dispatch only runs when dry_run was unticked.
+    if: ${{ github.event_name == 'push' || inputs.dry_run != true }}
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: install just-published tarball
+        # Tag pushes set GITHUB_REF_NAME to the tag (e.g. v0.1.7); strip the leading v.
+        # workflow_dispatch on a branch falls back to the registry's latest dist-tag —
+        # the publish-npm job just put something there.
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION=$(curl -s https://registry.npmjs.org/@danmestas/orch-executor-cf-worker/latest | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).version))")
+          fi
+          echo "installing @danmestas/orch-executor-cf-worker@$VERSION"
+          # Retry up to 5 times in case of registry propagation lag — npm's
+          # CDN can lag the publish API by tens of seconds.
+          for i in 1 2 3 4 5; do
+            if npm install -g "@danmestas/orch-executor-cf-worker@$VERSION"; then break; fi
+            echo "install attempt $i failed; sleeping 10s and retrying..."
+            sleep 10
+          done
+          npm list -g --depth=0 | grep '@danmestas/orch-executor-cf-worker' || (echo "package not installed" && exit 1)
+
+      - name: bin shim probe
+        # Proves the declared bin entry actually resolves on PATH and is
+        # executable. Catches the bin-path / shebang / dist-missing regression
+        # class that motivated this job.
+        run: |
+          set -euo pipefail
+          which orch-executor-cf-worker
+
+      - name: smoke — --version
+        # Proves the CLI loads and the compiled dist/ shipped in the tarball.
+        run: orch-executor-cf-worker --version
+
+      - name: smoke — --help
+        # Proves help text path is reachable too (exits 0, prints usage).
+        run: orch-executor-cf-worker --help
